@@ -98,3 +98,5 @@ where returns.refund_status = "Pending";
 -- Q30. Show the number of orders placed per payment method per year. Rows: payment_method, year, order_count.
 select payment_method , year(order_date) as order_year , count(*) as count
 from orders group by payment_method , order_year order by order_year;
+
+-- Q30. Show the number of orders placed per payment method per year. Rows: payment_method, year, order_count.

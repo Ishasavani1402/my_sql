@@ -71,4 +71,4 @@ select 2024_.customer_id , 2024_.order_date from 2024_ where 2024_.customer_id n
 -- Then using a window function, compute the average transit time per state (use the customer's state). 
 -- Show order_id, state, transit_days, and avg_transit_days_per_state.
 select customers.customer_id , orders.order_date from customers 
-join orders using(customer_id) where year(orders.order_date) = 2024
+join orders using(customer_id) where year(orders.order_date) = 2024;
