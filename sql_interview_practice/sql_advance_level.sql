@@ -17,18 +17,20 @@ select full_name , total_spent , dense_rank() over(order by total_spent desc) as
 -- Use ROW_NUMBER() inside a CTE.
 with revenue as (select products.product_name , products.category , sum(order_details.total_price) as total_revenue
 from products inner join order_details on products.product_id = order_details.product_id
-group by products.product_id , products.product_name , products.category order by total_revenue desc limit 2)
-select product_name , category , total_revenue , row_number() over(order by total_revenue desc) as ranked
-from revenue;
+group by products.product_id , products.product_name , products.category),
+ranked as (select * , row_number() over(partition by category order by total_revenue desc) as rn from revenue)
+select* 
+from ranked where rn <=2;
 
 -- Q33. Using LAG(), find each customer's previous order date alongside their current order date. 
 -- Show customer_id, order_id, order_date, and prev_order_date. Only show customers with more than 1 order.
-select customers.customer_id , orders.order_id , orders.order_date , 
-lag(orders.order_date) over(order by orders.order_date) as previous_order_date , 
-count(orders.order_id) as total_order
-from customers inner join orders on customers.customer_id = orders.customer_id
-group by customers.customer_id , orders.order_id , orders.order_date 
-having total_order > 1;
+WITH customer_orders AS(SELECT customer_id,order_id,order_date, LAG(order_date) OVER(
+PARTITION BY customer_id ORDER BY order_date) prev_order_date,
+COUNT(*) OVER(PARTITION BY customer_id) total_orders
+FROM orders)
+SELECT customer_id, order_id, order_date,prev_order_date
+FROM customer_orders
+WHERE total_orders>1;
 
 -- Q34. Write a CTE to calculate each customer's total orders and total spend. Then from that CTE, 
 -- find customers whose total spend is in the top 10% of all customers.
@@ -48,7 +50,8 @@ with revenue as (select year(orders.order_date) as order_year ,
 month(orders.order_date) as order_month , 
 sum(order_details.total_price) as total_revenue 
 from orders join order_details using(order_id) group by order_year , order_month)
-select order_year , order_month , sum(total_revenue) over(order by order_year , order_month) as cumulative_revenue 
+select order_year , order_month , total_revenue AS monthly_revenue,
+sum(total_revenue) over(order by order_year , order_month) as cumulative_revenue 
 from revenue order by order_year , order_month;
 
 -- Q36. Using CASE inside an aggregate, calculate the total revenue split by payment method as separate columns 
@@ -61,14 +64,55 @@ sum(case when orders.payment_method = "Wallet" then order_details.total_price el
 from orders inner join order_details on orders.order_id = order_details.order_id ;
 
 -- Q37. Identify customers who placed an order in 2024 but NOT in 2025. Use CTEs or subqueries.
-with 2024_ as (select customers.customer_id , orders.order_date from customers 
+with order_2024 as (select customers.customer_id , orders.order_date from customers 
 join orders using(customer_id) where year(orders.order_date) = 2024),
-2025_ as (select customers.customer_id , orders.order_date from customers 
+order_2025 as (select customers.customer_id , orders.order_date from customers 
 join orders using(customer_id) where year(orders.order_date) = 2025)
-select 2024_.customer_id , 2024_.order_date from 2024_ where 2024_.customer_id not in (select customer_id from 2025_);
+select order_2024.customer_id , order_2024.order_date from order_2024 
+where order_2024.customer_id not in (select customer_id from order_2025);
 
 -- Q38. For each order, calculate the number of days between shipped_date and delivery_date (transit time). 
 -- Then using a window function, compute the average transit time per state (use the customer's state). 
 -- Show order_id, state, transit_days, and avg_transit_days_per_state.
-select customers.customer_id , orders.order_date from customers 
-join orders using(customer_id) where year(orders.order_date) = 2024;
+select orders.order_id , customers.state ,datediff(delivery_date , shipped_date) as transit_time,
+ ROUND(AVG(DATEDIFF(orders.delivery_date, orders.shipped_date)) 
+ OVER (PARTITION BY customers.state), 0) AS avg_transit_days_per_state
+ from customers join orders using(customer_id);
+ 
+ -- Q39. Using ROW_NUMBER(), find the first order ever placed by each customer (earliest order_date per customer). 
+ -- Show customer_id, first_order_id, and first_order_date.
+WITH RankedOrders AS (
+SELECT
+        customer_id,
+        order_id,
+        order_date,
+        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date) AS order_rank
+    FROM
+        orders
+)
+SELECT
+    customer_id,
+    order_id AS first_order_id,
+    order_date AS first_order_date
+FROM
+    RankedOrders
+WHERE
+    order_rank = 1;
+    
+    
+-- Q40. Find customers who have both a 'Delivered' order AND a 'Returned' order. 
+-- Show customer_id, full name, total delivered orders, and total returned orders.
+select customers.customer_id ,  concat(first_name , " " , last_name) as full_name , 
+sum(case when orders.order_status = "Delivered" then 1 end) as deliver_order , 
+sum(case when orders.order_status = "Returned" then 1 end) as return_order  
+from customers join orders using (customer_id)
+group by customers.customer_id , full_name having  SUM(orders.order_status = 'Delivered') > 0
+    AND SUM(orders.order_status = 'Returned') > 0;
+        
+-- Q41. Find products that have a higher price than the average price of all products in the SAME category. 
+-- Use a correlated subquery or window function. Show product_name, category, price, and the category_avg_price.
+with avg_price as (SELECT *,
+AVG(price)
+OVER(PARTITION BY category) category_avg
+FROM products)
+select product_name , category , price , category_avg from avg_price where price > category_avg
