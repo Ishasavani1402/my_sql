@@ -59,4 +59,6 @@ group by products.category;
 select customers.customer_id , count(orders.order_id) as total_order ,
 sum(count(orders.order_id)) over() as total_order_all_customers
 from customers left join orders on 
-customers.customer_id = orders.customer_id group by customers.customer_id
+customers.customer_id = orders.customer_id group by customers.customer_id;
+
+
