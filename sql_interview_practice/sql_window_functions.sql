@@ -61,4 +61,91 @@ sum(count(orders.order_id)) over() as total_order_all_customers
 from customers left join orders on 
 customers.customer_id = orders.customer_id group by customers.customer_id;
 
+-- W11. For each row in order_details, show the running total of total_price ordered by order_detail_id. 
+-- Show order_detail_id, total_price, and running_total.
+select order_detail_id , total_price , sum(sum(total_price))  over(order by order_detail_id) as running_total
+from order_details group by order_detail_id , total_price;
 
+-- W12. Show the running total of revenue month by month for 2024. Show year, month, monthly_revenue, and cumulative_revenue.
+with revenue as (select year(orders.order_date) as order_year , 
+month(orders.order_date) as order_month , 
+sum(order_details.total_price) as total_revenue 
+from orders join order_details using(order_id)  group by order_year , order_month
+having order_year = 2024)
+select order_year , order_month , total_revenue AS monthly_revenue,
+sum(total_revenue) over(order by order_year , order_month) as cumulative_revenue 
+from revenue order by order_year , order_month;
+
+-- W13. For each order placed by a customer, show the current order_date and the previous order_date 
+-- (the one placed just before it). Show customer_id, order_id, order_date, and prev_order_date.
+select customers.customer_id , orders.order_id , orders.order_date, lag(orders.order_date) over(partition by customers.customer_id) as
+preveious_order_date
+from customers join orders
+using(customer_id) group by customers.customer_id , orders.order_id,orders.order_date
+order by  orders.order_date desc;
+
+-- W14. From W13 — calculate the number of days between each order and the customer's previous order. 
+-- Call it days_since_last_order. Rows where prev_order_date is NULL (first order) should show NULL or 0 — your choice.
+
+with lag_ as (select customers.customer_id , orders.order_id , orders.order_date, 
+lag(orders.order_date) over(partition by customers.customer_id) as
+preveious_order_date
+from customers join orders
+using(customer_id) group by customers.customer_id , orders.order_id,orders.order_date
+order by orders.order_date desc)
+select customer_id  , order_id , order_date , preveious_order_date , 
+datediff(order_date , preveious_order_date) as days_since_last_order
+from lag_;
+
+-- W15. For each product in order_details, show the current unit_price and the unit_price of the next order 
+-- for the same product. Call it next_order_price. This helps spot if a product's price changed across orders.
+select product_id , unit_price , lead(unit_price) over(partition by order_id) as
+next_order_price from order_details;
+
+-- W16. Find the first order placed by each customer. Show customer_id, order_id, and order_date.
+-- (Use ROW_NUMBER, not MIN — because interviewers specifically test this pattern)
+
+with all_order_date as (select customers.customer_id , orders.order_id , orders.order_date ,
+row_number() over(partition by customers.customer_id order by orders.order_date asc) as rnk
+from customers  inner join orders on 
+customers.customer_id = orders.customer_id )
+select customer_id , order_id , order_date from all_order_date where rnk = 1;
+
+-- W17. Rank customers by their total spend (sum of total_price). Show customer_id, total_spend, and rank. 
+-- Use DENSE_RANK. Top spender = Rank 1.
+with spent as (select customers.customer_id , sum(order_details.total_price) as total_spent  
+from customers inner join orders on 
+customers.customer_id = orders.customer_id
+inner join order_details on order_details.order_id = orders.order_id
+group by customers.customer_id)
+select customer_id , total_spent , dense_rank() over(order by total_spent desc)as rnk
+from spent;
+
+-- W18. For each state, find the customer who spent the most. Show state, customer full name, and their total spend.
+with spent as (select customers.state , concat(customers.first_name , " " , customers.last_name) as full_name , 
+sum(order_details.total_price) as total_spent ,
+row_number() over(partition by customers.state order by sum(order_details.total_price) desc)as rnk
+from customers inner join orders on 
+customers.customer_id = orders.customer_id
+inner join order_details on order_details.order_id = orders.order_id
+group by customers.state , full_name)
+select state , full_name , total_spent from spent where rnk =1;
+
+-- W19. For each month in 2024, calculate the month-over-month revenue change. 
+-- Show month, monthly_revenue, previous_month_revenue, and the difference (positive = growth, negative = drop).
+with a as (select year(orders.order_date) as order_year , month(orders.order_date) as order_month , 
+sum(order_details.total_price) as total_revenue 
+from orders join order_details using(order_id) group by order_year ,  order_month 
+having order_year = 2024 order by order_month),
+b as (select order_year , order_month , total_revenue ,
+lag(total_revenue) over(order by order_month asc) as previous_month_revenue
+from a)
+select order_year , order_month , total_revenue ,previous_month_revenue ,
+(total_revenue - previous_month_revenue) as diffrence from b;
+
+-- W20. Show each order_detail row with its product's total revenue, and flag it as 'Above Avg' or 'Below Avg' 
+-- based on whether its total_price is above or below the average total_price for that product category. 
+-- Show order_detail_id, product_id, category, total_price, category_avg, and price_flag.
+select order_details.order_detail_id , order_details.product_id, 
+products.category , sum(total_price) as total_price from order_details
+group by order_detail_id , product_id

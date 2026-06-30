@@ -25,7 +25,7 @@ from ranked where rn <=2;
 -- Q33. Using LAG(), find each customer's previous order date alongside their current order date. 
 -- Show customer_id, order_id, order_date, and prev_order_date. Only show customers with more than 1 order.
 WITH customer_orders AS(SELECT customer_id,order_id,order_date, LAG(order_date) OVER(
-PARTITION BY customer_id ORDER BY order_date) prev_order_date,
+PARTITION BY customer_id ORDER BY order_date) as prev_order_date,
 COUNT(*) OVER(PARTITION BY customer_id) total_orders
 FROM orders)
 SELECT customer_id, order_id, order_date,prev_order_date
