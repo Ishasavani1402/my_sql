@@ -12,9 +12,9 @@ from customers join orders using (customer_id);
 
 -- W2. For each customer, number their orders from 1, 2, 3... in the order they were placed. 
 -- Show customer_id, order_id, order_date, and order_rank_per_customer.
-select  customers.customer_id  , orders.order_id , orders.order_date , count(orders.order_id) as total_orders , 
-row_number() over(partition by customers.customer_id) as order_num
-from customers join orders using (customer_id) group by   orders.order_id,  customers.customer_id  , orders.order_date;
+select  customers.customer_id  , orders.order_id , orders.order_date , 
+row_number() over(partition by customers.customer_id order by orders.order_date) as order_num
+from customers join orders using (customer_id) ;
 
 -- W3. Rank all products by price (highest = rank 1). Show product_name, category, price, and price_rank.
 -- Use RANK(). Notice what happens when two products have the same price.
@@ -42,17 +42,19 @@ select product_name , category , price , price_rank from all_ranked where price_
 
 -- W8. Show each order's total_price alongside the overall average total_price across all orders. 
 -- Show order_id, total_price, and overall_avg_price in each row.
-select orders.order_id , order_details.total_price , avg( order_details.total_price) over(partition by orders.order_id)
+select orders.order_id , order_details.total_price , avg( order_details.total_price) over()
 as avg_total_price from orders inner join order_details 
 on orders.order_id = order_details.order_id;
 
 -- W9. For each order_detail row, show the total_price, the total revenue for that product's category, 
 -- and what percentage this row contributes to its category's total revenue.
-select products.category , 
-sum(order_details.total_price) as total_revenue , 
-round(100.0 * sum(order_details.total_price)/ sum(sum(order_details.total_price)) over(),2) as pct_of_total
-from order_details inner join products on order_details.product_id = products.product_id
-group by products.category;
+select order_details.order_detail_id , order_details.product_id , 
+products.category , order_details.total_price , 
+SUM(order_details.total_price) OVER (PARTITION BY products.category) AS category_total_revenue,
+ROUND(100.0 * order_details.total_price / SUM(order_details.total_price) OVER (PARTITION BY products.category),2)
+AS pct_of_category_total
+from order_details inner join products on products.product_id = order_details.product_id
+order by order_details.order_detail_id;
 
 -- W10. Show each customer's total number of orders alongside the total number of orders across all customers, in each row. 
 -- Show customer_id, customer_order_count, total_orders_all_customers.
@@ -78,20 +80,21 @@ from revenue order by order_year , order_month;
 
 -- W13. For each order placed by a customer, show the current order_date and the previous order_date 
 -- (the one placed just before it). Show customer_id, order_id, order_date, and prev_order_date.
-select customers.customer_id , orders.order_id , orders.order_date, lag(orders.order_date) over(partition by customers.customer_id) as
+select customers.customer_id , orders.order_id , orders.order_date, lag(orders.order_date) 
+over(partition by customers.customer_id order by orders.order_date) as
 preveious_order_date
 from customers join orders
-using(customer_id) group by customers.customer_id , orders.order_id,orders.order_date
+using(customer_id) 
 order by  orders.order_date desc;
 
 -- W14. From W13 — calculate the number of days between each order and the customer's previous order. 
 -- Call it days_since_last_order. Rows where prev_order_date is NULL (first order) should show NULL or 0 — your choice.
 
 with lag_ as (select customers.customer_id , orders.order_id , orders.order_date, 
-lag(orders.order_date) over(partition by customers.customer_id) as
+lag(orders.order_date) over(partition by customers.customer_id order by orders.order_date) as
 preveious_order_date
 from customers join orders
-using(customer_id) group by customers.customer_id , orders.order_id,orders.order_date
+using(customer_id) 
 order by orders.order_date desc)
 select customer_id  , order_id , order_date , preveious_order_date , 
 datediff(order_date , preveious_order_date) as days_since_last_order
@@ -99,7 +102,7 @@ from lag_;
 
 -- W15. For each product in order_details, show the current unit_price and the unit_price of the next order 
 -- for the same product. Call it next_order_price. This helps spot if a product's price changed across orders.
-select product_id , unit_price , lead(unit_price) over(partition by order_id) as
+select product_id , unit_price , lead(unit_price) over(partition by product_id order by order_id) as
 next_order_price from order_details;
 
 -- W16. Find the first order placed by each customer. Show customer_id, order_id, and order_date.
@@ -135,8 +138,8 @@ select state , full_name , total_spent from spent where rnk =1;
 -- Show month, monthly_revenue, previous_month_revenue, and the difference (positive = growth, negative = drop).
 with a as (select year(orders.order_date) as order_year , month(orders.order_date) as order_month , 
 sum(order_details.total_price) as total_revenue 
-from orders join order_details using(order_id) group by order_year ,  order_month 
-having order_year = 2024 order by order_month),
+from orders join order_details using(order_id)  WHERE year(order_date)=2024 group by order_year ,  order_month 
+order by order_month),
 b as (select order_year , order_month , total_revenue ,
 lag(total_revenue) over(order by order_month asc) as previous_month_revenue
 from a)
@@ -146,6 +149,32 @@ select order_year , order_month , total_revenue ,previous_month_revenue ,
 -- W20. Show each order_detail row with its product's total revenue, and flag it as 'Above Avg' or 'Below Avg' 
 -- based on whether its total_price is above or below the average total_price for that product category. 
 -- Show order_detail_id, product_id, category, total_price, category_avg, and price_flag.
-select order_details.order_detail_id , order_details.product_id, 
-products.category , sum(total_price) as total_price from order_details
-group by order_detail_id , product_id
+WITH category_avg AS (
+    SELECT
+        products.category,
+        AVG(order_details.total_price) AS avg_price
+    FROM
+        order_details
+    INNER JOIN
+        products ON order_details.product_id = products.product_id
+    GROUP BY
+        products.category
+)
+SELECT
+    od.order_detail_id,
+    od.product_id,
+    p.category,
+    od.total_price,
+    ca.avg_price AS category_avg,
+    CASE
+        WHEN od.total_price > ca.avg_price THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS price_flag
+FROM
+    order_details od
+INNER JOIN
+    products p ON od.product_id = p.product_id
+INNER JOIN
+    category_avg ca ON p.category = ca.category
+ORDER BY
+    od.order_detail_id;
